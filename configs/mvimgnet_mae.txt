@@ -1,6 +1,6 @@
 
 dataset_name=mvimgnet # dataset name - mvimgnet or shapenet
-data_dir=../../data/mvimgnet # dataset directory
+data_dir=/data2/MVImgNet17GB/mvi_32/ # dataset directory
 img_size=[160,90]
 vis_every=5000 # how you often visualize intermediate results
 
@@ -8,7 +8,7 @@ batch_size=84
 vis_every=5000
 n_iters=30001 # number of iterations for training
 
-base_dir=../../output/mae_finetuned # output parent directory
+base_dir=../output/ # output parent directory
 expname=mae_mvimgnet # output directory
 
 using_mae_pretrained=False # whether you would use the pretrained model as initialization

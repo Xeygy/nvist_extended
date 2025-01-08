@@ -1,6 +1,6 @@
 
 dataset_name=mvimgnet_nerf # dataset name - mvimgnet/mvimgnet_nerf
-data_dir=../../data/mvimgnet # dataset directory
+data_dir=/data2/MVImgNet17GB/mvi_32/ # dataset directory
 img_size=[160,90]
 vis_every=5000 # how you often visualize intermediate results
 number_of_imgs_from_the_same_scene=5
@@ -11,12 +11,12 @@ vis_every=5000
 n_iters=300001 # number of iterations for training
 ckpt=False 
 
-base_dir=../../output/nvist # output parent directory
+base_dir=../output/nvist # output parent directory
 expname=mvimgnet_test # output directory
 
 using_mae_pretrained=False # whether you would use the pretrained model as initialization
 using_mae_finetuned=True
-finetuned_mae_dir=../../output/mae_finetuned/mae_mvimgnet_imgnet
+finetuned_mae_dir=../output/mae_mvimgnet_imgnet
 initialize_decoder_with_pretrained=True
 
 lr_encoder_init=0.00004 # start lr rate (after warm up)
