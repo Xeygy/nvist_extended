@@ -49,8 +49,15 @@ def main():
     print('The batchsize is '+ str(args.batch_size))
     if args.split_batches:
         print('We split the above batch into ' + str(torch.cuda.device_count()) + ' gpu (s)')
+        batch_per_gpu = int(args.batch_size / torch.cuda.device_count())
+        batch_pixels_per_gpu = int(args.batch_pixel_size /torch.cuda.device_count())
+        n_iters = (args.n_iters // torch.cuda.device_count()) + 1
     else:
         print('each gpu will process ' + str(torch.cuda.device_count()))
+        batch_per_gpu = args.batch_size
+        batch_pixels_per_gpu = args.batch_pixel_size
+        n_iters = args.n_iters
+
     print('We are going to use this GPU - ' + torch.cuda.get_device_name(0))
 
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -100,23 +107,23 @@ def main():
     decoder_opt = torch.optim.AdamW(decoder_grad_vars)
     renderer_opt = torch.optim.AdamW(renderer_grad_vars)
 
-    train_loader, model, encoder_opt, decoder_opt, renderer_opt = accelerator.prepare(train_loader, model, encoder_opt, decoder_opt, renderer_opt)
+    # PREPARE
+    train_loader, model, encoder_opt, decoder_opt, renderer_opt = accelerator.prepare(
+        train_loader, model, encoder_opt, decoder_opt, renderer_opt)
     dl = cycle(train_loader)
 
     loss_fn_lpips = lpips.LPIPS(net='vgg').to(accelerator.device)
 
-    pbar = tqdm(range(start_iteration, args.n_iters, 1), miniters = 10)
+    pbar = tqdm(range(start_iteration, n_iters, 1), miniters = 10)
 
     # to use lpips loss
     assert args.batch_pixel_size >= H * W * args.batch_size
 
     psnr_test, lpips_test = [0.],[0.]
 
-    batch_per_gpu = int(args.batch_size / torch.cuda.device_count())
-    batch_pixels_per_gpu = int(args.batch_pixel_size /torch.cuda.device_count())
-
     for iteration in pbar:
         samples = next(dl)
+        #print('Active CUDA Device: GPU', torch.cuda.current_device(), iteration, samples['scene_idx'])
 
         imgs, ros_all, rds_all, _, original_img_hws = samples['images'], samples['ray_origins'], samples['ray_directions'], samples['scene_idx'], samples['original_img_hws']
         focals = samples['normalized_focals']
@@ -138,6 +145,7 @@ def main():
         assert rgbs_gt_all.shape == ros_all.shape
 
         if batch_per_gpu * args.number_of_imgs_from_the_same_scene * 3 * H * W != np.prod(torch.cat(imgs).shape): 
+            print(f"batch_per_gpu dataloader mismatch")
             continue
 
         idx = torch.randint(low=1, high=args.number_of_imgs_from_the_same_scene, size=(1,))
@@ -154,9 +162,9 @@ def main():
             sample_idxs_2 = training_sampler_2.nextids() + (1+idx.item())*H*W
             pixel_idxs = torch.cat([pixel_idxs_lpips, sample_idxs_1, sample_idxs_2])
 
-        rgb_gt = rgbs_gt_all[:,pixel_idxs].to(accelerator.device)
-        ro_train = ros_all[:,pixel_idxs].to(accelerator.device)
-        rd_train = rds_all[:,pixel_idxs].to(accelerator.device)
+        rgb_gt = rgbs_gt_all[:,pixel_idxs]#.to(accelerator.device)
+        ro_train = ros_all[:,pixel_idxs]#.to(accelerator.device)
+        rd_train = rds_all[:,pixel_idxs]#.to(accelerator.device)
 
         loss = torch.tensor(0.)
 
@@ -185,7 +193,7 @@ def main():
             
         accelerator.backward(loss)
 
-        accelerator.wait_for_everyone()
+        #accelerator.wait_for_everyone()
         accelerator.clip_grad_norm_(model.parameters(), 1.)
         
         encoder_opt.step()
@@ -194,16 +202,16 @@ def main():
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
         renderer_opt.zero_grad()
-        accelerator.wait_for_everyone()
+        #accelerator.wait_for_everyone()
 
 
         summary_writer.add_scalar('train/loss_l2', loss_l2.item(), global_step=iteration)
         summary_writer.add_scalar('train/loss_lpips', loss_lpips.item(), global_step=iteration)
         summary_writer.add_scalar('train/loss_dist', loss_dist.item(), global_step=iteration)
 
-        adjust_learning_rate(iteration, args.encoder_warmup_iters, args.n_iters, args.lr_encoder_init, args.lr_minimum, encoder_opt)
-        adjust_learning_rate(iteration, args.decoder_warmup_iters, args.n_iters, args.lr_decoder_init, args.lr_minimum, decoder_opt)
-        adjust_learning_rate(iteration, args.renderer_warmup_iters, args.n_iters, args.lr_renderer_init, args.lr_minimum, renderer_opt)
+        adjust_learning_rate(iteration, args.encoder_warmup_iters, n_iters, args.lr_encoder_init, args.lr_minimum, encoder_opt)
+        adjust_learning_rate(iteration, args.decoder_warmup_iters, n_iters, args.lr_decoder_init, args.lr_minimum, decoder_opt)
+        adjust_learning_rate(iteration, args.renderer_warmup_iters, n_iters, args.lr_renderer_init, args.lr_minimum, renderer_opt)
 
         prtx = f'{iteration:07d}'
 
@@ -295,8 +303,9 @@ def main():
         #         np.savetxt(os.path.join(output_dir, 'imgs_test', prtx + '.txt'), np.asarray([np.mean(psnr_test), np.mean(lpips_test)]))
         #         summary_writer.add_scalar('test/psnr_all', np.mean(psnr_test), global_step=iteration)
         #         summary_writer.add_scalar('test/lpips_all', np.mean(lpips_test), global_step=iteration)        
-
-        
+    # final save
+    ckpt = {'state_dict':model.state_dict(), 'iteration':iteration}
+    torch.save(ckpt, os.path.join(output_dir, 'nvist.pth'))
 if __name__ == "__main__":
     main()
  
